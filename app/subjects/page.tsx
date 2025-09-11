@@ -130,7 +130,7 @@ export default function SubjectsPage() {
                   <TableRow>
                     <TableHead>Name</TableHead>
                     <TableHead>Code</TableHead>
-                    <TableHead>Linked Classes</TableHead>
+                    {/* <TableHead>Linked Classes</TableHead> */}
                     <TableHead className="w-[70px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>

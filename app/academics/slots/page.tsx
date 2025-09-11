@@ -22,42 +22,40 @@ import {
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5000";
 const SLOTS_API = `${API_BASE}/api/timetable-slots`;
 
-// If you need auth headers, add them here (else keep it empty)
 function authHeaders(): HeadersInit {
   return {};
 }
 
-// --- TYPES mirrored from your backend shape (with populates) ---
+// --- TYPES ---
 type PopulatedRef = { _id: string; name?: string; code?: string };
 
 type ApiSlot = {
   _id: string;
-  day: string; // "Monday" | ...
-  startTime: string; // "09:00"
-  endTime: string;   // "10:00"
+  day: string;
+  startTime: string;
+  endTime: string;
   location?: { room?: string; link?: string };
-  class: PopulatedRef;           // populated with {name}
-  subject: PopulatedRef;         // populated with {name, code}
+  class: PopulatedRef;
+  subject: PopulatedRef;
   instructorName?: string;
   instructorId?: string;
   createdAt?: string;
   updatedAt?: string;
 };
 
-// View model for the UI (derives delivery + location text)
 type UiSlot = {
   id: string;
   day: string;
   startTime: string;
   endTime: string;
   delivery: "room" | "online";
-  locationText: string; // "Room 101" or URL
+  locationText: string;
   className: string;
-  course: string;       // subject.name (optionally include code)
+  course: string;
   instructor: string;
 };
 
-// Normalize API -> UI
+// --- NORMALIZER ---
 function toUiSlot(s: ApiSlot): UiSlot {
   const hasLink = !!s.location?.link;
   const delivery: UiSlot["delivery"] = hasLink ? "online" : "room";
@@ -76,10 +74,8 @@ function toUiSlot(s: ApiSlot): UiSlot {
   };
 }
 
-// Days used in calendar header
 const WEEK_DAYS: string[] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
-// Utility: stable sort by "HH:MM"
 function sortTimesAsc(times: string[]) {
   const toMin = (t: string) => {
     const [h, m] = t.split(":").map(Number);
@@ -88,7 +84,6 @@ function sortTimesAsc(times: string[]) {
   return [...times].sort((a, b) => toMin(a) - toMin(b));
 }
 
-// ✅ Guard to avoid invalid href on <a>
 function isValidHttpUrl(u?: string) {
   if (!u || typeof u !== "string") return false;
   try {
@@ -104,7 +99,6 @@ export default function SlotsPage() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
-  // Fetch all slots (apply query params here if needed)
   const fetchSlots = React.useCallback(async () => {
     try {
       setLoading(true);
@@ -119,7 +113,6 @@ export default function SlotsPage() {
         throw new Error(`Failed to fetch: ${res.status} ${t}`);
       }
       const json = await res.json();
-      // expecting { success: true, data: ApiSlot[] }
       const list: ApiSlot[] = json?.data || [];
       setSlots(list.map(toUiSlot));
     } catch (e: any) {
@@ -144,21 +137,19 @@ export default function SlotsPage() {
         const t = await res.text();
         throw new Error(`Delete failed: ${res.status} ${t}`);
       }
-      // Optimistic refresh
-      setSlots(prev => prev.filter(s => s.id !== id));
+      setSlots((prev) => prev.filter((s) => s.id !== id));
     } catch (e: any) {
       alert(e?.message || "Failed to delete slot.");
     }
   };
 
-  // Build calendar grid from fetched data
   const uniqueStartTimes = React.useMemo(
-    () => sortTimesAsc(Array.from(new Set(slots.map(s => s.startTime)))),
+    () => sortTimesAsc(Array.from(new Set(slots.map((s) => s.startTime)))),
     [slots]
   );
 
   const getSlotForDayAndTime = React.useCallback(
-    (day: string, time: string) => slots.find(s => s.day === day && s.startTime === time),
+    (day: string, time: string) => slots.find((s) => s.day === day && s.startTime === time),
     [slots]
   );
 
@@ -182,6 +173,7 @@ export default function SlotsPage() {
           <TabsTrigger value="calendar">Calendar View</TabsTrigger>
         </TabsList>
 
+        {/* TABLE VIEW */}
         <TabsContent value="table">
           <Card>
             <CardHeader>
@@ -229,15 +221,17 @@ export default function SlotsPage() {
                                 {slot.delivery === "online" && isValidHttpUrl(slot.locationText) ? (
                                   <a
                                     className="text-sm text-muted-foreground underline underline-offset-4"
-                                    href={slot.locationText}
+                                    href={slot.locationText.toString()}
                                     target="_blank"
                                     rel="noreferrer"
                                   >
-                                    {slot.locationText}
+                                    {slot.locationText.toString()}
                                   </a>
                                 ) : (
                                   <span className="text-sm text-muted-foreground">
-                                    {slot.delivery === "online" ? (slot.locationText || "—") : slot.locationText}
+                                    {typeof slot.locationText === "string" && slot.locationText.trim() !== ""
+                                      ? slot.locationText
+                                      : "—"}
                                   </span>
                                 )}
                               </div>
@@ -286,6 +280,7 @@ export default function SlotsPage() {
           </Card>
         </TabsContent>
 
+        {/* CALENDAR VIEW */}
         <TabsContent value="calendar">
           <Card>
             <CardHeader>
@@ -300,7 +295,6 @@ export default function SlotsPage() {
               ) : (
                 <div className="overflow-x-auto">
                   <div className="grid grid-cols-8 gap-1 min-w-[900px]">
-                    {/* Header */}
                     <div className="p-2 font-medium text-center bg-muted">Time</div>
                     {WEEK_DAYS.map((day) => (
                       <div key={day} className="p-2 font-medium text-center bg-muted">
@@ -308,11 +302,8 @@ export default function SlotsPage() {
                       </div>
                     ))}
 
-                    {/* Rows */}
                     {uniqueStartTimes.length === 0 ? (
-                      <div className="col-span-8 p-4 text-center text-sm text-muted-foreground">
-                        No slots to show.
-                      </div>
+                      <div className="col-span-8 p-4 text-center text-sm text-muted-foreground">No slots to show.</div>
                     ) : (
                       uniqueStartTimes.map((time) => (
                         <React.Fragment key={time}>
@@ -329,14 +320,18 @@ export default function SlotsPage() {
                                       {slot.delivery === "online" && isValidHttpUrl(slot.locationText) ? (
                                         <a
                                           className="underline underline-offset-4"
-                                          href={slot.locationText}
+                                          href={slot.locationText.toString()}
                                           target="_blank"
                                           rel="noreferrer"
                                         >
-                                          {slot.locationText}
+                                          {slot.locationText.toString()}
                                         </a>
                                       ) : (
-                                        slot.locationText || "—"
+                                        <span>
+                                          {typeof slot.locationText === "string" && slot.locationText.trim() !== ""
+                                            ? slot.locationText
+                                            : "—"}
+                                        </span>
                                       )}
                                     </div>
                                     <div className="mt-1">

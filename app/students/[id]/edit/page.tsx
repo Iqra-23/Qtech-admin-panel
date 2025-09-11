@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, use } from "react";
 import { useRouter } from "next/navigation";
 import { AdminLayout } from "@/components/admin-layout";
 import { StudentForm } from "@/components/student-form";
@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5000";
 
 interface EditStudentPageProps {
-  params: { id: string };
+  params: Promise<{ id: string }>; // ✅ params is a Promise now
 }
 
 type ClassRef = { _id: string; name?: string };
@@ -28,8 +28,8 @@ type StudentFromApi = {
   status: "Active" | "Inactive" | "Graduated";
   notes?: string;
   feeStatus?: "Paid" | "Unpaid" | "Partial" | "Overdue";
-  dateOfBirth?: string;   // ISO
-  admissionDate?: string; // ISO
+  dateOfBirth?: string;
+  admissionDate?: string;
 };
 
 function toYMD(iso?: string) {
@@ -42,6 +42,9 @@ function toYMD(iso?: string) {
 }
 
 export default function EditStudentPage({ params }: EditStudentPageProps) {
+  // ✅ unwrap params promise safely
+  const { id } = use(params);
+
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [errMsg, setErrMsg] = useState<string | null>(null);
@@ -55,7 +58,7 @@ export default function EditStudentPage({ params }: EditStudentPageProps) {
       try {
         setLoading(true);
         setErrMsg(null);
-        const res = await fetch(`${API_BASE}/api/students/${params.id}`, {
+        const res = await fetch(`${API_BASE}/api/students/${id}`, {
           headers: { "Content-Type": "application/json" },
         });
         const json = await res.json();
@@ -74,13 +77,13 @@ export default function EditStudentPage({ params }: EditStudentPageProps) {
     return () => {
       alive = false;
     };
-  }, [params.id]);
+  }, [id]);
 
   // Map API → StudentForm shape
   const formStudent = useMemo(() => {
     if (!apiStudent) return undefined;
     return {
-      id: apiStudent._id, // StudentForm uses this to decide PATCH
+      id: apiStudent._id,
       regNo: apiStudent.regNo || "",
       name: apiStudent.name || "",
       fatherName: apiStudent.fatherName || "",
@@ -97,11 +100,10 @@ export default function EditStudentPage({ params }: EditStudentPageProps) {
     };
   }, [apiStudent]);
 
-  // Force PATCH to the correct endpoint regardless of internal StudentForm logic
   const handleSubmit = async (payload: any) => {
     try {
       setSaving(true);
-      const res = await fetch(`${API_BASE}/api/students/${params.id}`, {
+      const res = await fetch(`${API_BASE}/api/students/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -110,8 +112,7 @@ export default function EditStudentPage({ params }: EditStudentPageProps) {
       if (!res.ok || !json?.success || !json?.data) {
         throw new Error(json?.message || json?.error || `Failed to update (status ${res.status})`);
       }
-      // Go to details page (or wherever you want after update)
-      router.push(`/students/${params.id}`);
+      router.push(`/students/${id}`);
     } catch (e: any) {
       alert(e?.message || "Failed to update student");
     } finally {
@@ -149,9 +150,7 @@ export default function EditStudentPage({ params }: EditStudentPageProps) {
       {!loading && !errMsg && formStudent && (
         <div className="mt-4">
           <StudentForm student={formStudent} onSubmit={handleSubmit} />
-          {saving && (
-            <div className="mt-2 text-sm text-muted-foreground">Saving your changes…</div>
-          )}
+          {saving && <div className="mt-2 text-sm text-muted-foreground">Saving your changes…</div>}
         </div>
       )}
     </AdminLayout>

@@ -5,6 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import { AdminLayout } from "@/components/admin-layout";
 import { ExamForm } from "@/components/exam-form";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import jsPDF from "jspdf";
 
 const RAW_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
 function withApiBase(base: string) {
@@ -22,7 +24,7 @@ type UIQuestion = {
   options?: string[];
   correctOptionIndex?: number;
   correctAnswerText?: string;
-  answerText?: string; // NEW
+  answerText?: string;
   points?: number;
 };
 
@@ -37,6 +39,7 @@ type UIExam = {
   questions: UIQuestion[];
   classId?: string;
   subjectId?: string;
+  fullPaperText?: string; // ✅ NEW
 };
 
 type ServerQuestion = {
@@ -46,7 +49,7 @@ type ServerQuestion = {
   options?: string[];
   correctOptionIndex?: number;
   correctAnswerText?: string;
-  answerText?: string; // NEW
+  answerText?: string;
   marks?: number;
   explanation?: string;
 };
@@ -63,6 +66,7 @@ type ServerExam = {
   instructions?: string;
   status: "draft" | "published" | "archived";
   questions: ServerQuestion[];
+  fullPaperText?: string; // ✅ NEW
 };
 
 type Class = { _id: string; name: string };
@@ -71,13 +75,17 @@ type Subject = { _id: string; name: string };
 function toUILocalDateTime(iso: string) {
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
+    d.getHours()
+  )}:${pad(d.getMinutes())}`;
 }
 function toServerDDMMYYYY_HHMM(input: string) {
   const d = new Date(input);
   if (isNaN(d.getTime())) return input;
   const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(
+    d.getHours()
+  )}:${pad(d.getMinutes())}`;
 }
 function mapServerToUI(ex: ServerExam): UIExam {
   return {
@@ -90,14 +98,18 @@ function mapServerToUI(ex: ServerExam): UIExam {
     instructions: ex.instructions || "",
     classId: ex.classId,
     subjectId: ex.subjectId,
+    fullPaperText: ex.fullPaperText || "", // ✅
     questions: (ex.questions || []).map((q, idx) => ({
       id: String(idx + 1),
       question: q.text,
-      type: q.type ?? (Array.isArray(q.options) && q.options.length ? "multiple-choice" : "short-answer"),
+      type:
+        q.type ??
+        (Array.isArray(q.options) && q.options.length ? "multiple-choice" : "short-answer"),
       options: q.options ?? [],
-      correctOptionIndex: typeof q.correctOptionIndex === "number" ? q.correctOptionIndex : undefined,
+      correctOptionIndex:
+        typeof q.correctOptionIndex === "number" ? q.correctOptionIndex : undefined,
       correctAnswerText: q.correctAnswerText ?? "",
-      answerText: q.answerText ?? "", // NEW
+      answerText: q.answerText ?? "",
       points: typeof q.marks === "number" ? q.marks : 1,
     })),
   };
@@ -132,8 +144,8 @@ export default function EditExamPage() {
         setServerExam(ex);
         setUiExam(mapServerToUI(ex));
 
-        setClasses(Array.isArray(cj) ? cj : (cj.data || []));
-        setSubjects(Array.isArray(sj) ? sj : (sj.data || []));
+        setClasses(Array.isArray(cj) ? cj : cj.data || []);
+        setSubjects(Array.isArray(sj) ? sj : sj.data || []);
       } catch (e: any) {
         alert(e.message || "Load failed");
         router.push("/exams");
@@ -152,42 +164,53 @@ export default function EditExamPage() {
       const subjectIdToSend = (merged as any).subjectId || serverExam.subjectId;
 
       const className =
-        classes.find(c => c._id === classIdToSend)?.name ??
-        merged.class ?? serverExam.className ?? "";
+        classes.find((c) => c._id === classIdToSend)?.name ??
+        merged.class ??
+        serverExam.className ??
+        "";
 
       const subjectName =
-        subjects.find(s => s._id === subjectIdToSend)?.name ??
-        merged.subject ?? serverExam.subjectName ?? "";
+        subjects.find((s) => s._id === subjectIdToSend)?.name ??
+        merged.subject ??
+        serverExam.subjectName ??
+        "";
 
-      const mergedQuestions = (merged.questions || []).map((q, idx): ServerQuestion => {
-        const prev = serverExam.questions?.[idx];
-        const type: QuestionType = q.type ?? prev?.type ?? "short-answer";
+      const mergedQuestions = (merged.questions || []).map(
+        (q, idx): ServerQuestion => {
+          const prev = serverExam.questions?.[idx];
+          const type: QuestionType = q.type ?? prev?.type ?? "short-answer";
 
-        const options = type === "multiple-choice" ? (q.options ?? prev?.options ?? []) : undefined;
-        const correctOptionIndex =
-          type === "multiple-choice"
-            ? (typeof q.correctOptionIndex === "number"
+          const options =
+            type === "multiple-choice"
+              ? q.options ?? prev?.options ?? []
+              : undefined;
+          const correctOptionIndex =
+            type === "multiple-choice"
+              ? typeof q.correctOptionIndex === "number"
                 ? q.correctOptionIndex
-                : (typeof prev?.correctOptionIndex === "number" ? prev.correctOptionIndex : undefined))
-            : undefined;
+                : typeof prev?.correctOptionIndex === "number"
+                ? prev.correctOptionIndex
+                : undefined
+              : undefined;
 
-        const correctAnswerText =
-          type !== "multiple-choice"
-            ? (q.correctAnswerText ?? prev?.correctAnswerText ?? "")
-            : undefined;
+          const correctAnswerText =
+            type !== "multiple-choice"
+              ? q.correctAnswerText ?? prev?.correctAnswerText ?? ""
+              : undefined;
 
-        return {
-          order: prev?.order ?? idx + 1,
-          type,
-          text: q.question,
-          options,
-          correctOptionIndex,
-          correctAnswerText,
-          answerText: (q.answerText ?? prev?.answerText ?? ""), // NEW
-          marks: typeof q.points === "number" ? q.points : (prev?.marks ?? 1),
-          explanation: prev?.explanation,
-        };
-      });
+          return {
+            order: prev?.order ?? idx + 1,
+            type,
+            text: q.question,
+            options,
+            correctOptionIndex,
+            correctAnswerText,
+            answerText: q.answerText ?? prev?.answerText ?? "",
+            marks: typeof q.points === "number" ? q.points : prev?.marks ?? 1,
+            explanation: prev?.explanation,
+          };
+        }
+      );
 
       const payload: Partial<ServerExam> = {
         title: merged.title,
@@ -198,6 +221,7 @@ export default function EditExamPage() {
         startAt: toServerDDMMYYYY_HHMM(merged.date),
         durationMinutes: merged.duration,
         instructions: merged.instructions || "",
+        fullPaperText: merged.fullPaperText || "", // ✅ include full paper
         questions: mergedQuestions,
       };
 
@@ -220,6 +244,17 @@ export default function EditExamPage() {
     else router.push("/exams");
   };
 
+  const handleDownloadPDF = () => {
+    if (!uiExam?.fullPaperText) {
+      alert("No paper content available");
+      return;
+    }
+    const doc = new jsPDF();
+    doc.setFont("times", "normal");
+    doc.text(uiExam.fullPaperText, 10, 10, { maxWidth: 180 });
+    doc.save(`${uiExam.title || "exam"}.pdf`);
+  };
+
   if (!id || loading || !uiExam) {
     return (
       <AdminLayout>
@@ -233,16 +268,40 @@ export default function EditExamPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold md:text-2xl">Edit Exam</h1>
-          <p className="text-muted-foreground">Update exam details and questions</p>
+          <p className="text-muted-foreground">
+            Update exam details and questions
+          </p>
         </div>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>Exam Details</CardTitle>
-          <CardDescription>Modify the exam information and questions as needed</CardDescription>
+          <CardDescription>
+            Modify the exam information and questions as needed
+          </CardDescription>
         </CardHeader>
         <CardContent>
+          {/* ✅ New textarea for full paper */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium mb-1">
+              Full Paper Content
+            </label>
+            <textarea
+              className="w-full rounded border p-2 text-sm"
+              rows={10}
+              value={uiExam.fullPaperText || ""}
+              onChange={(e) =>
+                setUiExam({ ...(uiExam as UIExam), fullPaperText: e.target.value })
+              }
+              placeholder="Paste or write the complete paper here..."
+            />
+            <Button className="mt-2" onClick={handleDownloadPDF}>
+              Download Paper as PDF
+            </Button>
+          </div>
+
+          {/* Existing exam form */}
           <ExamForm
             exam={{
               ...uiExam,
@@ -252,14 +311,15 @@ export default function EditExamPage() {
                 id: q.id ?? String(idx + 1),
                 points: q.points ?? 1,
                 type: q.type ?? "short-answer",
-                options: q.type === "multiple-choice" ? (q.options ?? []) : [],
+                options: q.type === "multiple-choice" ? q.options ?? [] : [],
                 correctOptionIndex:
-                  q.type === "multiple-choice" && typeof q.correctOptionIndex === "number"
+                  q.type === "multiple-choice" &&
+                  typeof q.correctOptionIndex === "number"
                     ? q.correctOptionIndex
                     : undefined,
                 correctAnswerText:
-                  q.type !== "multiple-choice" ? (q.correctAnswerText ?? "") : undefined,
-                answerText: q.answerText ?? "", // NEW
+                  q.type !== "multiple-choice" ? q.correctAnswerText ?? "" : undefined,
+                answerText: q.answerText ?? "",
               })),
             }}
             // @ts-ignore

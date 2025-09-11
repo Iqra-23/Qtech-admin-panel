@@ -1,329 +1,399 @@
+"use client"
+
+import { useState, useEffect } from "react"
 import { AdminLayout } from "@/components/admin-layout"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
-import { Plus, Edit, Trash2, Save } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Eye, EyeOff, Lock, CheckCircle, XCircle, AlertTriangle } from "lucide-react"
 
-const mockSessions = [
-  { name: "Academic Year 2024-25", startDate: "2024-04-01", endDate: "2025-03-31", status: "Active" },
-  { name: "Academic Year 2023-24", startDate: "2023-04-01", endDate: "2024-03-31", status: "Completed" },
-  { name: "Summer Session 2024", startDate: "2024-05-01", endDate: "2024-06-30", status: "Completed" },
-]
+// Define interfaces for type safety
+interface PasswordForm {
+  currentPassword: string
+  newPassword: string
+  confirmNewPassword: string
+}
 
-const mockGradingBands = [
-  { grade: "A+", minMarks: 90, maxMarks: 100, gpa: 4.0, description: "Outstanding" },
-  { grade: "A", minMarks: 80, maxMarks: 89, gpa: 3.7, description: "Excellent" },
-  { grade: "B+", minMarks: 70, maxMarks: 79, gpa: 3.3, description: "Very Good" },
-  { grade: "B", minMarks: 60, maxMarks: 69, gpa: 3.0, description: "Good" },
-  { grade: "C", minMarks: 50, maxMarks: 59, gpa: 2.0, description: "Satisfactory" },
-  { grade: "F", minMarks: 0, maxMarks: 49, gpa: 0.0, description: "Fail" },
-]
+interface ShowPasswords {
+  current: boolean
+  new: boolean
+  confirm: boolean
+}
+
+interface PasswordAlert {
+  type: string
+  message: string
+}
 
 export default function SettingsPage() {
+  // Change Password States
+  const [passwordForm, setPasswordForm] = useState<PasswordForm>({
+    currentPassword: '',
+    newPassword: '',
+    confirmNewPassword: ''
+  })
+  const [showPasswords, setShowPasswords] = useState<ShowPasswords>({
+    current: false,
+    new: false,
+    confirm: false
+  })
+  const [passwordLoading, setPasswordLoading] = useState<boolean>(false)
+  const [passwordAlert, setPasswordAlert] = useState<PasswordAlert>({ type: '', message: '' })
+  const [isLoading, setIsLoading] = useState<boolean>(true)
+
+  // Check if token exists on component mount
+  useEffect(() => {
+    // Just check if token exists, don't verify it
+    const token = getToken()
+    console.log('Token found:', token ? 'Yes' : 'No')
+    
+    if (!token) {
+      console.log('No token found')
+      setPasswordAlert({ 
+        type: 'error', 
+        message: 'You need to be logged in to access settings.' 
+      })
+    }
+    
+    setIsLoading(false)
+  }, [])
+
+  // Get token from localStorage or sessionStorage
+  const getToken = (): string | null => {
+    if (typeof window !== 'undefined') {
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token')
+      return token
+    }
+    return null
+  }
+
+  // Handle password form changes
+  const handlePasswordChange = (field: keyof PasswordForm, value: string): void => {
+    setPasswordForm(prev => ({
+      ...prev,
+      [field]: value
+    }))
+    // Clear alerts when user starts typing
+    if (passwordAlert.message) {
+      setPasswordAlert({ type: '', message: '' })
+    }
+  }
+
+  // Toggle password visibility
+  const togglePasswordVisibility = (field: keyof ShowPasswords): void => {
+    setShowPasswords(prev => ({
+      ...prev,
+      [field]: !prev[field]
+    }))
+  }
+
+  // Validate password form
+  const validatePasswordForm = (): boolean => {
+    const { currentPassword, newPassword, confirmNewPassword } = passwordForm
+    
+    if (!currentPassword || !newPassword || !confirmNewPassword) {
+      setPasswordAlert({ type: 'error', message: 'All fields are required' })
+      return false
+    }
+    
+    if (newPassword.length < 6) {
+      setPasswordAlert({ type: 'error', message: 'New password must be at least 6 characters long' })
+      return false
+    }
+    
+    if (newPassword !== confirmNewPassword) {
+      setPasswordAlert({ type: 'error', message: 'New passwords do not match' })
+      return false
+    }
+    
+    if (currentPassword === newPassword) {
+      setPasswordAlert({ type: 'error', message: 'New password must be different from current password' })
+      return false
+    }
+    
+    return true
+  }
+
+  // Handle password change submission
+  const handlePasswordSubmit = async (e: React.FormEvent<HTMLFormElement>): Promise<void> => {
+    e.preventDefault()
+    
+    if (!validatePasswordForm()) {
+      return
+    }
+
+    const token = getToken()
+    if (!token) {
+      setPasswordAlert({ type: 'error', message: 'You need to be logged in to change password. Please log in again.' })
+      return
+    }
+
+    setPasswordLoading(true)
+    setPasswordAlert({ type: '', message: '' })
+
+    try {
+      console.log('Attempting to change password...')
+      const response = await fetch('http://localhost:5000/api/auth/change-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          currentPassword: passwordForm.currentPassword,
+          newPassword: passwordForm.newPassword,
+          confirmNewPassword: passwordForm.confirmNewPassword
+        })
+      })
+
+      console.log('Password change response status:', response.status)
+      const data = await response.json()
+      console.log('Password change response data:', data)
+
+      if (response.ok && data.success) {
+        setPasswordAlert({ type: 'success', message: data.message || 'Password changed successfully!' })
+        // Clear form after successful change
+        setPasswordForm({
+          currentPassword: '',
+          newPassword: '',
+          confirmNewPassword: ''
+        })
+      } else {
+        // Handle specific error cases
+        if (response.status === 401) {
+          setPasswordAlert({ 
+            type: 'error', 
+            message: 'Session expired or invalid credentials. Please log in again.' 
+          })
+          // Clear tokens
+          localStorage.removeItem('token')
+          sessionStorage.removeItem('token')
+        } else if (response.status === 400) {
+          setPasswordAlert({ 
+            type: 'error', 
+            message: data.message || 'Invalid request. Please check your input.' 
+          })
+        } else if (response.status === 403) {
+          setPasswordAlert({ 
+            type: 'error', 
+            message: 'Current password is incorrect. Please try again.' 
+          })
+        } else {
+          setPasswordAlert({ 
+            type: 'error', 
+            message: data.message || 'Failed to change password. Please try again.' 
+          })
+        }
+      }
+    } catch (error) {
+      console.error('Password change error:', error)
+      setPasswordAlert({ 
+        type: 'error', 
+        message: 'Network error. Please check your connection and try again.' 
+      })
+    } finally {
+      setPasswordLoading(false)
+    }
+  }
+
+  // Get alert icon based on type
+  const getAlertIcon = (type: string): React.ReactNode => {
+    switch (type) {
+      case 'success':
+        return <CheckCircle className="h-4 w-4" />
+      case 'error':
+        return <XCircle className="h-4 w-4" />
+      case 'warning':
+        return <AlertTriangle className="h-4 w-4" />
+      default:
+        return null
+    }
+  }
+
+  // Show loading state briefly
+  if (isLoading) {
+    return (
+      <AdminLayout>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Loading settings...</p>
+          </div>
+        </div>
+      </AdminLayout>
+    )
+  }
+
   return (
     <AdminLayout>
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between mb-6">
         <h1 className="text-lg font-semibold md:text-2xl">Settings</h1>
-        <Button className="gap-2">
-          <Save className="h-4 w-4" />
-          Save Changes
-        </Button>
       </div>
 
-      <Tabs defaultValue="profile" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="profile">School Profile</TabsTrigger>
-          <TabsTrigger value="sessions">Academic Sessions</TabsTrigger>
-          <TabsTrigger value="grading">Grading Bands</TabsTrigger>
-        </TabsList>
+      <div className="max-w-2xl">
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Lock className="h-5 w-5" />
+              <CardTitle>Change Password</CardTitle>
+            </div>
+            <CardDescription>
+              Update your account password. Make sure to use a strong password for security.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handlePasswordSubmit} className="space-y-4">
+              {/* Alert Message */}
+              {passwordAlert.message && (
+                <Alert variant={passwordAlert.type === 'error' ? 'destructive' : 'default'}>
+                  {getAlertIcon(passwordAlert.type)}
+                  <AlertDescription>
+                    {passwordAlert.message}
+                  </AlertDescription>
+                </Alert>
+              )}
 
-        <TabsContent value="profile" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Basic Information</CardTitle>
-              <CardDescription>Update your school's basic details and contact information</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="school-name">School Name</Label>
-                  <Input id="school-name" defaultValue="Springfield International School" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="school-code">School Code</Label>
-                  <Input id="school-code" defaultValue="SIS2024" />
-                </div>
-              </div>
-
+              {/* Current Password */}
               <div className="space-y-2">
-                <Label htmlFor="address">Address</Label>
-                <Textarea id="address" defaultValue="123 Education Street, Springfield, State 12345" />
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-3">
-                <div className="space-y-2">
-                  <Label htmlFor="phone">Phone</Label>
-                  <Input id="phone" defaultValue="+1 (555) 123-4567" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input id="email" type="email" defaultValue="admin@springfield-school.edu" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="website">Website</Label>
-                  <Input id="website" defaultValue="www.springfield-school.edu" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Academic Configuration</CardTitle>
-              <CardDescription>Configure academic year and term settings</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="academic-year">Current Academic Year</Label>
-                  <Select defaultValue="2024-25">
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="2024-25">2024-25</SelectItem>
-                      <SelectItem value="2023-24">2023-24</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="current-term">Current Term</Label>
-                  <Select defaultValue="term1">
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="term1">Term 1</SelectItem>
-                      <SelectItem value="term2">Term 2</SelectItem>
-                      <SelectItem value="term3">Term 3</SelectItem>
-                    </SelectContent>
-                  </Select>
+                <Label htmlFor="current-password">Current Password</Label>
+                <div className="relative">
+                  <Input
+                    id="current-password"
+                    type={showPasswords.current ? "text" : "password"}
+                    value={passwordForm.currentPassword}
+                    onChange={(e) => handlePasswordChange('currentPassword', e.target.value)}
+                    placeholder="Enter your current password"
+                    className="pr-10"
+                    disabled={passwordLoading}
+                    autoComplete="current-password"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                    onClick={() => togglePasswordVisibility('current')}
+                    disabled={passwordLoading}
+                    tabIndex={-1}
+                  >
+                    {showPasswords.current ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </Button>
                 </div>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="working-days">Working Days per Week</Label>
-                  <Select defaultValue="5">
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="5">5 Days</SelectItem>
-                      <SelectItem value="6">6 Days</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="class-duration">Class Duration (minutes)</Label>
-                  <Input id="class-duration" type="number" defaultValue="45" />
+              {/* New Password */}
+              <div className="space-y-2">
+                <Label htmlFor="new-password">New Password</Label>
+                <div className="relative">
+                  <Input
+                    id="new-password"
+                    type={showPasswords.new ? "text" : "password"}
+                    value={passwordForm.newPassword}
+                    onChange={(e) => handlePasswordChange('newPassword', e.target.value)}
+                    placeholder="Enter your new password (min. 6 characters)"
+                    className="pr-10"
+                    disabled={passwordLoading}
+                    autoComplete="new-password"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                    onClick={() => togglePasswordVisibility('new')}
+                    disabled={passwordLoading}
+                    tabIndex={-1}
+                  >
+                    {showPasswords.new ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </Button>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
 
-        <TabsContent value="sessions" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Academic Sessions</CardTitle>
-                  <CardDescription>Manage academic years and session periods</CardDescription>
+              {/* Confirm New Password */}
+              <div className="space-y-2">
+                <Label htmlFor="confirm-password">Confirm New Password</Label>
+                <div className="relative">
+                  <Input
+                    id="confirm-password"
+                    type={showPasswords.confirm ? "text" : "password"}
+                    value={passwordForm.confirmNewPassword}
+                    onChange={(e) => handlePasswordChange('confirmNewPassword', e.target.value)}
+                    placeholder="Confirm your new password"
+                    className="pr-10"
+                    disabled={passwordLoading}
+                    autoComplete="new-password"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                    onClick={() => togglePasswordVisibility('confirm')}
+                    disabled={passwordLoading}
+                    tabIndex={-1}
+                  >
+                    {showPasswords.confirm ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </Button>
                 </div>
-                <Dialog>
-                  <DialogTrigger asChild>
-                    <Button className="gap-2">
-                      <Plus className="h-4 w-4" />
-                      Add Session
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent aria-describedby="session-dialog-description">
-                    <DialogHeader>
-                      <DialogTitle>Create New Academic Session</DialogTitle>
-                      <DialogDescription id="session-dialog-description">
-                        Define a new academic session with start and end dates
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="grid gap-4 py-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="session-name">Session Name</Label>
-                        <Input id="session-name" placeholder="e.g., Academic Year 2025-26" />
-                      </div>
-                      <div className="grid gap-4 grid-cols-2">
-                        <div className="space-y-2">
-                          <Label htmlFor="start-date">Start Date</Label>
-                          <Input id="start-date" type="date" />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="end-date">End Date</Label>
-                          <Input id="end-date" type="date" />
-                        </div>
-                      </div>
-                    </div>
-                    <DialogFooter>
-                      <Button type="submit">Create Session</Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
               </div>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Session Name</TableHead>
-                    <TableHead>Start Date</TableHead>
-                    <TableHead>End Date</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {mockSessions.map((session, index) => (
-                    <TableRow key={index}>
-                      <TableCell className="font-medium">{session.name}</TableCell>
-                      <TableCell>{session.startDate}</TableCell>
-                      <TableCell>{session.endDate}</TableCell>
-                      <TableCell>
-                        <Badge variant={session.status === "Active" ? "default" : "secondary"}>{session.status}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Button variant="outline" size="sm" className="h-8 w-8 p-0 bg-transparent">
-                            <Edit className="h-3 w-3" />
-                          </Button>
-                          <Button variant="outline" size="sm" className="h-8 w-8 p-0 text-destructive bg-transparent">
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
 
-        <TabsContent value="grading" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Grading Bands</CardTitle>
-                  <CardDescription>Configure grade boundaries and GPA calculations</CardDescription>
-                </div>
-                <Dialog>
-                  <DialogTrigger asChild>
-                    <Button className="gap-2">
-                      <Plus className="h-4 w-4" />
-                      Add Grade
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent aria-describedby="grade-dialog-description">
-                    <DialogHeader>
-                      <DialogTitle>Create New Grade Band</DialogTitle>
-                      <DialogDescription id="grade-dialog-description">
-                        Define a new grading band with marks range and GPA
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="grid gap-4 py-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="grade-name">Grade</Label>
-                        <Input id="grade-name" placeholder="e.g., A+, B, C" />
-                      </div>
-                      <div className="grid gap-4 grid-cols-2">
-                        <div className="space-y-2">
-                          <Label htmlFor="min-marks">Minimum Marks</Label>
-                          <Input id="min-marks" type="number" placeholder="0" />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="max-marks">Maximum Marks</Label>
-                          <Input id="max-marks" type="number" placeholder="100" />
-                        </div>
-                      </div>
-                      <div className="grid gap-4 grid-cols-2">
-                        <div className="space-y-2">
-                          <Label htmlFor="gpa">GPA</Label>
-                          <Input id="gpa" type="number" step="0.1" placeholder="4.0" />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="description">Description</Label>
-                          <Input id="description" placeholder="e.g., Outstanding" />
-                        </div>
-                      </div>
-                    </div>
-                    <DialogFooter>
-                      <Button type="submit">Create Grade Band</Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
+              {/* Password Requirements */}
+              <div className="bg-muted p-3 rounded-md text-sm">
+                <h4 className="font-medium mb-2">Password Requirements:</h4>
+                <ul className="space-y-1 text-muted-foreground">
+                  <li className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full ${passwordForm.newPassword.length >= 6 ? 'bg-green-500' : 'bg-gray-300'}`} />
+                    At least 6 characters long
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full ${passwordForm.newPassword !== passwordForm.currentPassword && passwordForm.newPassword ? 'bg-green-500' : 'bg-gray-300'}`} />
+                    Different from current password
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full ${passwordForm.newPassword === passwordForm.confirmNewPassword && passwordForm.newPassword ? 'bg-green-500' : 'bg-gray-300'}`} />
+                    Passwords match
+                  </li>
+                </ul>
               </div>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Grade</TableHead>
-                    <TableHead>Min Marks</TableHead>
-                    <TableHead>Max Marks</TableHead>
-                    <TableHead>GPA</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {mockGradingBands.map((band, index) => (
-                    <TableRow key={index}>
-                      <TableCell className="font-medium">{band.grade}</TableCell>
-                      <TableCell>{band.minMarks}</TableCell>
-                      <TableCell>{band.maxMarks}</TableCell>
-                      <TableCell>{band.gpa}</TableCell>
-                      <TableCell>{band.description}</TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Button variant="outline" size="sm" className="h-8 w-8 p-0 bg-transparent">
-                            <Edit className="h-3 w-3" />
-                          </Button>
-                          <Button variant="outline" size="sm" className="h-8 w-8 p-0 text-destructive bg-transparent">
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+
+              {/* Submit Button */}
+              <div className="flex justify-end pt-4">
+                <Button 
+                  type="submit" 
+                  disabled={passwordLoading || !getToken()}
+                  className="w-full sm:w-auto"
+                >
+                  {passwordLoading ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      Changing Password...
+                    </>
+                  ) : (
+                    <>
+                      <Lock className="h-4 w-4 mr-2" />
+                      Change Password
+                    </>
+                  )}
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
     </AdminLayout>
   )
 }

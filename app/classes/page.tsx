@@ -1,14 +1,13 @@
-// app/classes/page.tsx
-"use client";
+"use client"
 
-import { useState, useEffect, useMemo } from "react";
-import dynamic from "next/dynamic";
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { MoreHorizontal, Plus, Edit, Trash2, Eye, Users, Loader2, RefreshCcw } from "lucide-react";
+import { useState, useEffect } from "react"
+import dynamic from "next/dynamic"
+import Link from "next/link"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Badge } from "@/components/ui/badge"
+import { MoreHorizontal, Plus, Edit, Trash2, Eye, Users, Loader2 } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,132 +15,101 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@/components/ui/dropdown-menu"
 
 // Dynamically import AdminLayout to prevent SSR
 const AdminLayout = dynamic(
-  () => import("@/components/admin-layout").then((mod) => ({ default: mod.AdminLayout })),
+  () => import("@/components/admin-layout").then(mod => ({ default: mod.AdminLayout })),
   {
     ssr: false,
-    loading: () => <div className="min-h-screen bg-background" />,
+    loading: () => <div className="min-h-screen bg-background" />
   }
-);
+)
 
 interface ClassItem {
-  _id: string;
-  name: string;
-  description?: string;
-  subjects?: any[];
-  courses?: any[];
-  students?: any[];
+  _id: string
+  name: string
+  description?: string
+  subjects?: any[]
+  courses?: any[]   // keep type; UI usage commented out below
+  students?: any[]
 }
 
 function ClassesContent() {
-  const [classes, setClasses] = useState<ClassItem[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-  const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState<boolean>(false);
+  const [classes, setClasses] = useState<ClassItem[]>([])
+  const [loading, setLoading] = useState<boolean>(true)
+  const [error, setError] = useState<string | null>(null)
+  const [deleteId, setDeleteId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<boolean>(false)
 
-  const API_BASE = useMemo(
-    () =>
-      (process.env.NEXT_PUBLIC_API_BASE_URL ||
-        process.env.NEXT_PUBLIC_API_BASE ||
-        "http://localhost:5000"
-      ).replace(/\/$/, ""),
-    []
-  );
-
-  // Fetch classes from API (fresh)
+  // Fetch classes from API
   const fetchClasses = async () => {
     try {
-      setLoading(true);
-      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-      const headers: HeadersInit = token
-        ? { "Content-Type": "application/json", Authorization: `Bearer ${token}` }
-        : { "Content-Type": "application/json" };
-
-      const response = await fetch(`${API_BASE}/api/classes`, {
-        headers,
-        cache: "no-store", // 👈 force fresh data
-      });
-      const result = await response.json();
+      setLoading(true)
+      const response = await fetch('http://localhost:5000/api/classes')
+      const result = await response.json()
 
       if (!response.ok) {
-        throw new Error(result?.message || "Failed to fetch classes");
+        throw new Error(result.message || 'Failed to fetch classes')
       }
 
-      if (result?.success && Array.isArray(result?.data)) {
-        setClasses(result.data);
-        setError(null);
+      if (result.success) {
+        setClasses(result.data)
+        setError(null)
       } else {
-        // Support fallback shapes if needed
-        const data =
-          (Array.isArray(result?.items) && result.items) ||
-          (Array.isArray(result?.results) && result.results) ||
-          (Array.isArray(result) && result) ||
-          [];
-        setClasses(data);
-        setError(null);
+        throw new Error(result.message || 'Failed to fetch classes')
       }
     } catch (err: any) {
-      setError(err.message);
-      console.error("Error fetching classes:", err.message);
+      setError(err.message)
+      console.error('Error fetching classes:', err.message)
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
-  // Delete class then refresh list from server
+  // Delete class
   const handleDelete = async (id: string) => {
     try {
-      setDeleting(true);
-      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
-      const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+      setDeleting(true)
+      const response = await fetch(`http://localhost:5000/api/classes/${id}`, {
+        method: 'DELETE',
+      })
+      const result = await response.json()
 
-      const response = await fetch(`${API_BASE}/api/classes/${id}`, {
-        method: "DELETE",
-        headers,
-      });
-      const result = await response.json();
-
-      if (!response.ok || result?.success === false) {
-        throw new Error(result?.message || "Failed to delete class");
+      if (!response.ok) {
+        throw new Error(result.message || 'Failed to delete class')
       }
 
-      // Re-fetch from server so counts/virtuals are correct
-      await fetchClasses();
-      console.log("Class deleted successfully");
+      if (result.success) {
+        setClasses(classes.filter(cls => cls._id !== id))
+        console.log('Class deleted successfully')
+      } else {
+        throw new Error(result.message || 'Failed to delete class')
+      }
     } catch (err: any) {
-      console.error("Error deleting class:", err.message);
+      console.error('Error deleting class:', err.message)
     } finally {
-      setDeleting(false);
-      setDeleteId(null);
+      setDeleting(false)
+      setDeleteId(null)
     }
-  };
+  }
 
   // Load classes on component mount
   useEffect(() => {
-    fetchClasses();
+    fetchClasses()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [])
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold md:text-2xl">Classes</h1>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={fetchClasses} title="Refresh">
-            <RefreshCcw className="mr-2 h-4 w-4" />
-            Refresh
+        <Link href="/classes/create">
+          <Button className="gap-2">
+            <Plus className="h-4 w-4" />
+            Add Class
           </Button>
-          <Link href="/classes/create">
-            <Button className="gap-2">
-              <Plus className="h-4 w-4" />
-              Add Class
-            </Button>
-          </Link>
-        </div>
+        </Link>
       </div>
 
       <Card>
@@ -180,7 +148,10 @@ function ClassesContent() {
                     <TableHead>Name</TableHead>
                     <TableHead>Description</TableHead>
                     <TableHead>Subjects</TableHead>
-                    {/* <TableHead>Courses</TableHead> */}
+                    {/* ---------------------------------------------
+                        Courses column hidden (kept for future use)
+                        <TableHead>Courses</TableHead>
+                       --------------------------------------------- */}
                     <TableHead>Students</TableHead>
                     <TableHead className="w-[70px]">Actions</TableHead>
                   </TableRow>
@@ -197,11 +168,16 @@ function ClassesContent() {
                           {classItem.subjects?.length || 0} subjects
                         </Badge>
                       </TableCell>
-                      {/* <TableCell>
-                        <Badge variant="secondary">
-                          {classItem.courses?.length || 0} courses
-                        </Badge>
-                      </TableCell> */}
+
+                      {/* ---------------------------------------------------------
+                          Courses cell hidden (kept for future use)
+                          <TableCell>
+                            <Badge variant="secondary">
+                              {classItem.courses?.length || 0} courses
+                            </Badge>
+                          </TableCell>
+                         --------------------------------------------------------- */}
+
                       <TableCell>
                         <Link href={`/students?classId=${classItem._id}`}>
                           <Badge variant="outline" className="cursor-pointer hover:bg-accent">
@@ -288,7 +264,7 @@ function ClassesContent() {
         </div>
       )}
     </div>
-  );
+  )
 }
 
 export default function ClassesPage() {
@@ -296,5 +272,5 @@ export default function ClassesPage() {
     <AdminLayout>
       <ClassesContent />
     </AdminLayout>
-  );
+  )
 }
