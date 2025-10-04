@@ -1,13 +1,20 @@
-// app/classes/create/page.tsx
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
+
+interface Subject {
+  _id: string;
+  name: string;
+  code?: string;
+}
 
 export default function CreateClassPage() {
   const router = useRouter();
@@ -23,11 +30,39 @@ export default function CreateClassPage() {
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  // Optional: simple CSV to populate the `courses: string[]`
-  const [coursesCsv, setCoursesCsv] = useState("");
+  const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
+
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [loadingSubjects, setLoadingSubjects] = useState(true);
 
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // 🔹 Fetch subjects from backend
+  useEffect(() => {
+    const fetchSubjects = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/subjects`, { cache: "no-store" });
+        if (!res.ok) throw new Error(`Failed with status ${res.status}`);
+
+        const json = await res.json();
+        if (Array.isArray(json)) {
+          setSubjects(json);
+        } else if (json.data) {
+          setSubjects(json.data);
+        } else {
+          throw new Error("Unexpected response format");
+        }
+      } catch (error: any) {
+        console.error("Error fetching subjects:", error.message);
+        setErr("Failed to load subjects");
+      } finally {
+        setLoadingSubjects(false);
+      }
+    };
+
+    fetchSubjects();
+  }, [API_BASE]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -47,10 +82,7 @@ export default function CreateClassPage() {
       const payload = {
         name: name.trim(),
         description: description.trim() || undefined,
-        courses: coursesCsv
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean),
+        subjectIds: selectedSubjects,
       };
 
       const res = await fetch(`${API_BASE}/api/classes`, {
@@ -64,8 +96,8 @@ export default function CreateClassPage() {
         throw new Error(json?.message || json?.error || `Failed (status ${res.status})`);
       }
 
-      // go back to list & force refresh so the new class appears
-      router.push("/classes");
+      // ✅ redirect to class list if it exists
+      router.push("/classes"); 
       router.refresh();
     } catch (e: any) {
       setErr(e?.message || "Failed to create class");
@@ -73,6 +105,12 @@ export default function CreateClassPage() {
       setSaving(false);
     }
   }
+
+  const toggleSubject = (id: string, checked: boolean) => {
+    setSelectedSubjects((prev) =>
+      checked ? [...prev, id] : prev.filter((sid) => sid !== id)
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -91,7 +129,7 @@ export default function CreateClassPage() {
         <CardContent>
           <form className="space-y-6" onSubmit={handleSubmit}>
             <div className="space-y-2">
-              <label htmlFor="name" className="text-sm font-medium">Name *</label>
+              <Label htmlFor="name">Name *</Label>
               <Input
                 id="name"
                 value={name}
@@ -102,7 +140,7 @@ export default function CreateClassPage() {
             </div>
 
             <div className="space-y-2">
-              <label htmlFor="description" className="text-sm font-medium">Description</label>
+              <Label htmlFor="description">Description</Label>
               <Textarea
                 id="description"
                 value={description}
@@ -112,18 +150,29 @@ export default function CreateClassPage() {
               />
             </div>
 
-            {/* optional helper for your Class.courses: string[] */}
+            {/* 🔹 Subjects Section */}
             <div className="space-y-2">
-              <label htmlFor="courses" className="text-sm font-medium">Courses (comma-separated)</label>
-              <Input
-                id="courses"
-                value={coursesCsv}
-                onChange={(e) => setCoursesCsv(e.target.value)}
-                placeholder="e.g. Algebra I, Geometry"
-              />
-              <p className="text-xs text-muted-foreground">
-                These are saved as strings into the <code>courses</code> array.
-              </p>
+              <Label>Subjects</Label>
+              {loadingSubjects ? (
+                <p className="text-sm text-muted-foreground">Loading subjects…</p>
+              ) : subjects.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No subjects found</p>
+              ) : (
+                <div className="grid gap-3 md:grid-cols-2">
+                  {subjects.map((subj) => (
+                    <div key={subj._id} className="flex items-center space-x-2">
+                      <Checkbox
+                        id={subj._id}
+                        checked={selectedSubjects.includes(subj._id)}
+                        onCheckedChange={(checked) => toggleSubject(subj._id, checked as boolean)}
+                      />
+                      <Label htmlFor={subj._id} className="text-sm font-normal">
+                        {subj.name} {subj.code ? `(${subj.code})` : ""}
+                      </Label>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {err && <div className="text-sm text-red-600">{err}</div>}

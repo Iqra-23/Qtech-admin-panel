@@ -1,8 +1,6 @@
 "use client"
 
-import type React from "react"
-
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -12,13 +10,11 @@ import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { toast } from "@/hooks/use-toast"
 
-const mockSubjects = [
-  { id: "1", name: "Mathematics", code: "MATH" },
-  { id: "2", name: "English", code: "ENG" },
-  { id: "3", name: "Science", code: "SCI" },
-  { id: "4", name: "History", code: "HIST" },
-  { id: "5", name: "Geography", code: "GEO" },
-]
+interface Subject {
+  _id: string
+  name: string
+  code?: string
+}
 
 interface ClassFormProps {
   classData?: {
@@ -39,15 +35,45 @@ export function ClassForm({ classData, onSubmit }: ClassFormProps) {
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
 
+  const [subjects, setSubjects] = useState<Subject[]>([])
+  const [loadingSubjects, setLoadingSubjects] = useState(true)
+
+  // 🔹 Fetch subjects from backend API
+  useEffect(() => {
+    const fetchSubjects = async () => {
+      try {
+        const res = await fetch("http://localhost:5000/api/subjects", {
+          cache: "no-store",
+        })
+        const json = await res.json()
+
+        if (res.ok && json.success && Array.isArray(json.data)) {
+          setSubjects(json.data)
+        } else {
+          throw new Error(json.message || "Failed to fetch subjects")
+        }
+      } catch (err: any) {
+        console.error("Error fetching subjects:", err.message)
+        toast({
+          title: "Error",
+          description: "Failed to load subjects from server",
+          variant: "destructive",
+        })
+      } finally {
+        setLoadingSubjects(false)
+      }
+    }
+
+    fetchSubjects()
+  }, [])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsSubmitting(true)
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-
       if (onSubmit) {
-        onSubmit(formData)
+        onSubmit(formData) // 🔹 send subjectIds with other data
       } else {
         toast({
           title: classData ? "Class Updated" : "Class Created",
@@ -55,7 +81,7 @@ export function ClassForm({ classData, onSubmit }: ClassFormProps) {
         })
         router.push("/classes")
       }
-    } catch (error) {
+    } catch {
       toast({
         title: "Error",
         description: "Something went wrong. Please try again.",
@@ -69,7 +95,9 @@ export function ClassForm({ classData, onSubmit }: ClassFormProps) {
   const handleSubjectToggle = (subjectId: string, checked: boolean) => {
     setFormData((prev) => ({
       ...prev,
-      subjectIds: checked ? [...prev.subjectIds, subjectId] : prev.subjectIds.filter((id) => id !== subjectId),
+      subjectIds: checked
+        ? [...prev.subjectIds, subjectId]
+        : prev.subjectIds.filter((id) => id !== subjectId),
     }))
   }
 
@@ -107,20 +135,28 @@ export function ClassForm({ classData, onSubmit }: ClassFormProps) {
 
           <div className="space-y-4">
             <Label>Subjects</Label>
-            <div className="grid gap-3 md:grid-cols-2">
-              {mockSubjects.map((subject) => (
-                <div key={subject.id} className="flex items-center space-x-2">
-                  <Checkbox
-                    id={subject.id}
-                    checked={formData.subjectIds.includes(subject.id)}
-                    onCheckedChange={(checked) => handleSubjectToggle(subject.id, checked as boolean)}
-                  />
-                  <Label htmlFor={subject.id} className="text-sm font-normal">
-                    {subject.name} ({subject.code})
-                  </Label>
-                </div>
-              ))}
-            </div>
+            {loadingSubjects ? (
+              <p className="text-sm text-muted-foreground">Loading subjects…</p>
+            ) : subjects.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No subjects found</p>
+            ) : (
+              <div className="grid gap-3 md:grid-cols-2">
+                {subjects.map((subject) => (
+                  <div key={subject._id} className="flex items-center space-x-2">
+                    <Checkbox
+                      id={subject._id}
+                      checked={formData.subjectIds.includes(subject._id)}
+                      onCheckedChange={(checked) =>
+                        handleSubjectToggle(subject._id, checked as boolean)
+                      }
+                    />
+                    <Label htmlFor={subject._id} className="text-sm font-normal">
+                      {subject.name} {subject.code ? `(${subject.code})` : ""}
+                    </Label>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="flex gap-4">

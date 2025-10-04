@@ -36,7 +36,6 @@ const navigation = [
     children: [
       { name: "Admit Student", href: "/students/admit" },
       { name: "All Students", href: "/students" },
-      // { name: "Promotion", href: "/students/promotion" },
       { name: "Graduated", href: "/students/graduated" },
     ],
   },
@@ -51,10 +50,12 @@ const navigation = [
   },
   {
     name: "Attendance",
-    href: "/attendance",
     icon: UserCheck,
+    children: [
+      { name: "Mark Attendance", href: "/attendance" },
+      { name: "Attendance Records", href: "/attendance/records" },
+    ],
   },
-  // ✅ Make this a dropdown with two items
   {
     name: "Exams & Marks",
     icon: ClipboardList,
@@ -76,16 +77,6 @@ const navigation = [
       { name: "Expenses", href: "/admin/expenses" },
     ],
   },
-  // {
-  //   name: "Reports",
-  //   href: "/reports",
-  //   icon: BarChart3,
-  // },
-  // {
-  //   name: "PINs",
-  //   href: "/pins",
-  //   icon: CreditCard,
-  // },
   {
     name: "Settings",
     href: "/settings",

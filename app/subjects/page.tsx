@@ -178,12 +178,12 @@ export default function SubjectsPage() {
                           <DropdownMenuContent align="end">
                             <DropdownMenuLabel>Actions</DropdownMenuLabel>
                             <DropdownMenuSeparator />
-                            <DropdownMenuItem asChild>
+                            {/* <DropdownMenuItem asChild>
                               <Link href={`/subjects/${subject._id}`}>
                                 <Eye className="mr-2 h-4 w-4" />
                                 View Details
                               </Link>
-                            </DropdownMenuItem>
+                            </DropdownMenuItem> */}
                             <DropdownMenuItem asChild>
                               <Link href={`/subjects/${subject._id}/edit`}>
                                 <Edit className="mr-2 h-4 w-4" />

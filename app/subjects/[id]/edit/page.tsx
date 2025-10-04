@@ -1,7 +1,6 @@
-// app/subjects/[id]/edit/page.tsx
 "use client";
 
-import { use, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AdminLayout } from "@/components/admin-layout";
 import { SubjectForm } from "@/components/subject-form";
@@ -33,10 +32,8 @@ export default function EditSubjectPage() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  // Load existing subject (prefill)
   useEffect(() => {
     if (!id) return;
-    
     let alive = true;
     (async () => {
       try {
@@ -59,10 +56,11 @@ export default function EditSubjectPage() {
         if (alive) setLoading(false);
       }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [id]);
 
-  // Map API → SubjectForm shape
   const formSubject = useMemo(() => {
     if (!apiSubject) return undefined;
     return {
@@ -75,7 +73,6 @@ export default function EditSubjectPage() {
     };
   }, [apiSubject]);
 
-  // Always PATCH (even if SubjectForm defaults to POST for "create")
   const handleSubmit = async (payload: any) => {
     if (!id) return;
     try {
@@ -120,7 +117,9 @@ export default function EditSubjectPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold md:text-2xl">Edit Subject</h1>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => router.back()}>Back</Button>
+          <Button variant="outline" onClick={() => router.back()}>
+            Back
+          </Button>
           <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
             {deleting ? "Deleting…" : "Delete"}
           </Button>
@@ -140,7 +139,7 @@ export default function EditSubjectPage() {
             <CardDescription>Could not load the subject.</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-sm text-red-color">{errMsg}</div>
+            <div className="text-sm text-red-600">{errMsg}</div>
           </CardContent>
         </Card>
       )}

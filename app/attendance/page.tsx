@@ -1,757 +1,492 @@
-"use client"
+"use client";
 
-import { useEffect, useMemo, useState } from "react"
-import { AdminLayout } from "@/components/admin-layout"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
-import { BarChart3, Save, Download } from "lucide-react"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useState, useEffect, useMemo } from "react";
+import { toast } from "@/hooks/use-toast";
+import { AdminLayout } from "@/components/admin-layout";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { format } from "date-fns";
+import { CalendarIcon, Save, Download, Users } from "lucide-react";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
+import { useRouter } from "next/navigation";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5000"
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:5000";
 
-// --- Types
-interface PopStudent {
-  _id: string
-  name?: string
-  regNo?: string
-}
-interface PopClass { _id: string; name?: string }
-interface PopTimeslot {
-  _id: string
-  name?: string
-  subject?: string
-  label?: string
-  startTime?: string
-  endTime?: string
-}
-interface AttendanceDoc {
-  _id: string
-  date: string
-  class?: PopClass
-  timeslot?: PopTimeslot
-  totalStudents: number
-  presentStudents: PopStudent[]
-  absentStudents: PopStudent[]
-  lateStudents: PopStudent[]
-  notes?: string
-  createdAt: string
-}
-type Mark = "present" | "absent" | "late" | "unmarked"
+type AttendanceStatus = "present" | "absent" | "late";
+interface Student { _id: string; name: string; regNo: string }
+interface Class { _id: string; name: string }
+interface AttendanceRecord { studentId: string; status: AttendanceStatus; notes: string }
 
-function todayUtc() {
-  const d = new Date()
-  return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
-}
+export default function AttendanceMarkingPage() {
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [selectedClass, setSelectedClass] = useState<string>("");
+  const [attendance, setAttendance] = useState<Record<string, AttendanceRecord>>({});
+  const [students, setStudents] = useState<Student[]>([]);
+  const [classes, setClasses] = useState<Class[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [hasExistingRecord, setHasExistingRecord] = useState(false);
 
-function toYMD(date: Date) {
-  const y = date.getUTCFullYear()
-  const m = `${date.getUTCMonth() + 1}`.padStart(2, "0")
-  const d = `${date.getUTCDate()}`.padStart(2, "0")
-  return `${y}-${m}-${d}`
-}
-function slotText(t?: PopTimeslot) {
-  if (!t) return "—"
-  if (t.startTime && t.endTime) return `${t.startTime} - ${t.endTime}`
-  return t.label || t.name || "—"
-}
-function subjectText(t?: PopTimeslot) { return t?.subject || t?.name || "—" }
-function classText(c?: PopClass) { return c?.name || "—" }
+  const router = useRouter();
 
-export default function AttendancePage() {
-  // ---- Filters
-  const [selectedDate, setSelectedDate] = useState<Date>(() => todayUtc())
-  const [selectedMonth, setSelectedMonth] = useState<Date>(() => {
-    const d = todayUtc()
-    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1))
-  })
-  const [classId, setClassId] = useState<string>("")
-  const [timeslotId, setTimeslotId] = useState<string>("")
+  // Fetch CLASSES
+  useEffect(() => {
+    fetch(`${API_BASE}/api/classes`)
+      .then((res) => res.json())
+      .then((json) => setClasses(json?.data || []))
+      .catch((err) => console.error("Error fetching classes:", err));
+  }, []);
 
-  // ---- Dropdown data
-  const [classes, setClasses] = useState<PopClass[]>([])
-  const [classesLoading, setClassesLoading] = useState(false)
-  const [classesError, setClassesError] = useState<string | null>(null)
+  // Fetch STUDENTS based on selected class
+  useEffect(() => {
+    if (!selectedClass) {
+      setStudents([]);
+      setAttendance({});
+      return;
+    }
 
-  const [slots, setSlots] = useState<PopTimeslot[]>([])
-  const [slotsLoading, setSlotsLoading] = useState(false)
-  const [slotsError, setSlotsError] = useState<string | null>(null)
+    fetch(`${API_BASE}/api/students/class/${selectedClass}`)
+      .then((res) => res.json())
+      .then((json) => {
+        const studentData = json?.data || [];
+        setStudents(studentData);
+        
+        // Initialize attendance for all students as "present" by default
+        const initialAttendance: Record<string, AttendanceRecord> = {};
+        studentData.forEach((student: Student) => {
+          initialAttendance[student._id] = {
+            studentId: student._id,
+            status: "present",
+            notes: ""
+          };
+        });
+        setAttendance(initialAttendance);
+      })
+      .catch((err) => console.error("Error fetching students:", err));
+  }, [selectedClass]);
 
-  // ---- Students & marking
-  const [students, setStudents] = useState<PopStudent[]>([])
-  const [marks, setMarks] = useState<Record<string, Mark>>({})
-  const [notes, setNotes] = useState<string>("")
-  const [studentsLoading, setStudentsLoading] = useState(false)
-  const [studentsError, setStudentsError] = useState<string | null>(null)
+  // Fetch ATTENDANCE based on selected class and date
+  useEffect(() => {
+    if (!selectedClass || !selectedDate || students.length === 0) return;
 
-  // ---- Daily & Monthly
-  const [dailyRows, setDailyRows] = useState<AttendanceDoc[]>([])
-  const [dailyLoading, setDailyLoading] = useState(false)
-  const [dailyError, setDailyError] = useState<string | null>(null)
+    const dateStr = selectedDate.toISOString().split("T")[0];
 
-  const [monthlyAgg, setMonthlyAgg] = useState<
-    { studentId: string; student: string; regNo: string; present: number; absent: number; late: number; percentage: number }[]
-  >([])
-  const [monthlyLoading, setMonthlyLoading] = useState(false)
-  const [monthlyError, setMonthlyError] = useState<string | null>(null)
+    fetch(`${API_BASE}/api/attendance?classId=${selectedClass}&date=${dateStr}`)
+      .then((res) => res.json())
+      .then((json) => {
+        console.log("Fetched attendance:", json); // Debug log
+        
+        if (json.success && json.data && json.data.length > 0) {
+          const attendanceData = json.data[0];
+          const formattedAttendance: Record<string, AttendanceRecord> = {};
+          
+          // Initialize all students as unmarked first
+          students.forEach((student) => {
+            formattedAttendance[student._id] = {
+              studentId: student._id,
+              status: "present", // Default fallback
+              notes: ""
+            };
+          });
 
-  // =========================
-  // Fetch CLASSES (dropdown)
-  // =========================
-  async function fetchClasses() {
+          // Mark present students
+          if (attendanceData.presentStudents && attendanceData.presentStudents.length > 0) {
+            attendanceData.presentStudents.forEach((student: any) => {
+              const studentId = typeof student === 'string' ? student : student._id;
+              if (formattedAttendance[studentId]) {
+                formattedAttendance[studentId].status = "present";
+              }
+            });
+          }
+
+          // Mark absent students
+          if (attendanceData.absentStudents && attendanceData.absentStudents.length > 0) {
+            attendanceData.absentStudents.forEach((student: any) => {
+              const studentId = typeof student === 'string' ? student : student._id;
+              if (formattedAttendance[studentId]) {
+                formattedAttendance[studentId].status = "absent";
+              }
+            });
+          }
+
+          // Mark late students
+          if (attendanceData.lateStudents && attendanceData.lateStudents.length > 0) {
+            attendanceData.lateStudents.forEach((student: any) => {
+              const studentId = typeof student === 'string' ? student : student._id;
+              if (formattedAttendance[studentId]) {
+                formattedAttendance[studentId].status = "late";
+              }
+            });
+          }
+
+          console.log("Formatted attendance:", formattedAttendance); // Debug log
+          setAttendance(formattedAttendance);
+          
+          toast({
+            title: "Attendance Loaded",
+            description: `Previous attendance record found for ${format(selectedDate, "PPP")}`,
+          });
+        } else {
+          // No attendance record exists, initialize all as present
+          console.log("No existing attendance, initializing defaults");
+          const initialAttendance: Record<string, AttendanceRecord> = {};
+          students.forEach((student) => {
+            initialAttendance[student._id] = {
+              studentId: student._id,
+              status: "present",
+              notes: ""
+            };
+          });
+          setAttendance(initialAttendance);
+        }
+      })
+      .catch((err) => {
+        console.error("Error fetching attendance:", err);
+        // On error, initialize all as present
+        const initialAttendance: Record<string, AttendanceRecord> = {};
+        students.forEach((student) => {
+          initialAttendance[student._id] = {
+            studentId: student._id,
+            status: "present",
+            notes: ""
+          };
+        });
+        setAttendance(initialAttendance);
+      });
+  }, [selectedClass, selectedDate, students]);
+
+  const handleStatusChange = (studentId: string, status: AttendanceStatus) => {
+    setAttendance((prev) => ({
+      ...prev,
+      [studentId]: { studentId, status, notes: prev[studentId]?.notes || "" },
+    }));
+  };
+
+  const handleNotesChange = (studentId: string, notes: string) => {
+    setAttendance((prev) => ({
+      ...prev,
+      [studentId]: { studentId, status: prev[studentId]?.status || "present", notes },
+    }));
+  };
+
+  const handleSave = async () => {
+    if (!selectedClass) {
+      return toast({ title: "Error", description: "Select a class first", variant: "destructive" });
+    }
+
+    if (students.length === 0) {
+      return toast({ title: "Error", description: "No students found in this class", variant: "destructive" });
+    }
+
+    setIsSaving(true);
     try {
-      setClassesLoading(true); setClassesError(null)
-      const res = await fetch(`${API_BASE}/api/classes`)
-      if (!res.ok) throw new Error(`Failed to fetch classes: ${res.status} ${res.statusText}`)
-      const json = await res.json()
-      if (!json?.success) throw new Error(json?.message || "Failed to fetch classes")
-      const list: PopClass[] = (json.data || []).map((c: any) => ({ _id: c._id, name: c.name }))
-      setClasses(list)
-      if (classId && !list.find(c => c._id === classId)) {
-        setClassId("")
-        setTimeslotId("")
-        setSlots([])
-      }
-    } catch (e: any) {
-      setClassesError(e?.message || "Failed to fetch classes")
-      setClasses([])
-    } finally {
-      setClassesLoading(false)
-    }
-  }
-  useEffect(() => { fetchClasses() }, [])
+      const presentStudents: string[] = [];
+      const absentStudents: string[] = [];
+      const lateStudents: string[] = [];
 
-  // =========================
-  // Fetch TIMESLOTS (dropdown) filtered by class
-  // =========================
-  async function fetchSlotsForClass(cid: string) {
-    if (!cid) { setSlots([]); setSlotsError(null); return }
-    try {
-      setSlotsLoading(true); setSlotsError(null)
-      const res = await fetch(`${API_BASE}/api/timetable-slots?classId=${cid}`)
-      if (!res.ok) throw new Error(`Failed to fetch timeslots: ${res.status} ${res.statusText}`)
-      const json = await res.json()
-      if (!json?.success) throw new Error(json?.message || "Failed to fetch timeslots")
-      const list: PopTimeslot[] = (json.data || []).map((t: any) => ({
-        _id: t._id,
-        name: t.name,
-        subject: t.subject?.name || t.subject?.code || t.subject,
-        label: t.label,
-        startTime: t.startTime,
-        endTime: t.endTime,
-      }))
-      setSlots(list)
-      if (timeslotId && !list.find(s => s._id === timeslotId)) setTimeslotId("")
-    } catch (e: any) {
-      setSlotsError(e?.message || "Failed to fetch timeslots")
-      setSlots([])
-      setTimeslotId("")
-    } finally {
-      setSlotsLoading(false)
-    }
-  }
-  useEffect(() => { fetchSlotsForClass(classId) }, [classId])
+      // Categorize all students based on their attendance status
+      students.forEach((student) => {
+        const record = attendance[student._id];
+        const status = record?.status || "present"; // Default to present if not marked
+        
+        if (status === "present") presentStudents.push(student._id);
+        else if (status === "absent") absentStudents.push(student._id);
+        else if (status === "late") lateStudents.push(student._id);
+      });
 
-  // =========================
-  // Fetch Students by Class
-  // =========================
-  async function fetchStudents() {
-    if (!classId || classId.trim().length < 8) {
-      setStudents([]); setMarks({}); setStudentsError(null); return
-    }
-    try {
-      setStudentsLoading(true)
-      setStudentsError(null)
-      const res = await fetch(`${API_BASE}/api/students/class/${classId}?limit=500&sortBy=name&sortOrder=asc`)
-      if (!res.ok) throw new Error(`Failed to fetch students: ${res.status} ${res.statusText}`)
-      const json = await res.json()
-      if (!json?.success) throw new Error(json?.message || "Failed to fetch students")
-      const list: PopStudent[] = (json.data || []).map((s: any) => ({
-        _id: s._id, name: s.name, regNo: s.regNo
-      }))
-      setStudents(list)
-      setMarks({})
-    } catch (e: any) {
-      setStudentsError(e?.message || "Failed to fetch students")
-      setStudents([]); setMarks({})
-    } finally {
-      setStudentsLoading(false)
-    }
-  }
-  useEffect(() => { fetchStudents() /* eslint-disable-next-line */ }, [classId])
+      const payload = {
+        date: selectedDate.toISOString().split("T")[0],
+        class: selectedClass, // Backend expects "class", not "classId"
+        totalStudents: students.length,
+        presentStudents,
+        absentStudents,
+        lateStudents,
+        notes: "Attendance recorded",
+      };
 
-  // =========================
-  // Reset form after save
-  // =========================
-  function resetForm() {
-    setClassId("")
-    setTimeslotId("")
-    setNotes("")
-    setMarks({})
-    setStudents([])
-    setSlots([])
-    setSelectedDate(todayUtc())
-  }
+      console.log("Sending payload:", payload); // Debug log
 
-  // =========================
-  // Save Attendance (/api/attendance)
-  // =========================
-  async function saveAttendance() {
-    if (!classId) return alert("Please select a Class.")
-    if (!timeslotId) return alert("Please select a Timeslot.")
-    if (!selectedDate) return alert("Please pick a valid date.")
-
-    const presentStudents: string[] = []
-    const absentStudents: string[] = []
-    const lateStudents: string[] = []
-    students.forEach((s) => {
-      const m = marks[s._id] || "unmarked"
-      if (m === "present") presentStudents.push(s._id)
-      else if (m === "absent") absentStudents.push(s._id)
-      else if (m === "late") lateStudents.push(s._id)
-    })
-
-    const all = [...presentStudents, ...absentStudents, ...lateStudents]
-    const unique = new Set(all)
-    if (unique.size !== all.length) return alert("A student cannot be in multiple buckets.")
-
-    const payload = {
-      date: toYMD(selectedDate),
-      timeslot: timeslotId,
-      class: classId,
-      totalStudents: students.length,
-      presentStudents,
-      absentStudents,
-      lateStudents,
-      notes: notes?.trim() || undefined,
-    }
-
-    try {
-      const res = await fetch(`${API_BASE}/api/attendance`, {
+      // First, try to POST (create new)
+      let res = await fetch(`${API_BASE}/api/attendance`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-      })
-      const json = await res.json()
-      if (!res.ok || !json?.success) return alert(json?.message || `Failed to save (${res.status})`)
+      });
+      
+      let json = await res.json();
 
-      alert("Attendance saved.")
-      await fetchDaily()
-      await fetchMonthly()
-      resetForm()
-    } catch (e: any) {
-      alert(e?.message || "Failed to save attendance")
-    }
-  }
-
-  // =========================
-  // Daily & Monthly (/api/attendance)
-  // =========================
-  async function fetchDaily() {
-    try {
-      setDailyLoading(true); setDailyError(null)
-      const params = new URLSearchParams()
-      params.set("date", toYMD(selectedDate))
-      if (classId) params.set("classId", classId)
-      if (timeslotId) params.set("timeslotId", timeslotId)
-
-      const res = await fetch(`${API_BASE}/api/attendance?${params.toString()}`)
-      if (!res.ok) throw new Error(`Daily fetch failed: ${res.status} ${res.statusText}`)
-      const json = await res.json()
-      if (!json?.success) throw new Error(json?.message || "Daily fetch failed")
-      setDailyRows(json.data as AttendanceDoc[])
-    } catch (e: any) {
-      setDailyError(e?.message || "Failed to fetch daily summary")
-      setDailyRows([])
-    } finally {
-      setDailyLoading(false)
-    }
-  }
-  useEffect(() => { fetchDaily() /* eslint-disable-next-line */ }, [selectedDate, classId, timeslotId])
-
-  function allMonthDates(baseMonth: Date) {
-    const start = new Date(Date.UTC(baseMonth.getUTCFullYear(), baseMonth.getUTCMonth(), 1))
-    const next = new Date(Date.UTC(baseMonth.getUTCFullYear(), baseMonth.getUTCMonth() + 1, 1))
-    const days: Date[] = []
-    for (let d = new Date(start); d < next; d.setUTCDate(d.getUTCDate() + 1)) days.push(new Date(d))
-    return days
-  }
-
-  async function fetchMonthly() {
-    try {
-      setMonthlyLoading(true); setMonthlyError(null)
-      const days = allMonthDates(selectedMonth)
-      const requests = days.map((d) => {
-        const params = new URLSearchParams()
-        params.set("date", toYMD(d))
-        if (classId) params.set("classId", classId)
-        if (timeslotId) params.set("timeslotId", timeslotId)
-        return fetch(`${API_BASE}/api/attendance?${params.toString()}`).then(async (r) => {
-          if (!r.ok) throw new Error(`Monthly fetch failed for ${toYMD(d)}: ${r.status}`)
-          const j = await r.json()
-          if (!j?.success) throw new Error(j?.message || `Monthly fetch failed for ${toYMD(d)}`)
-          return j.data as AttendanceDoc[]
-        })
-      })
-      const perDay = await Promise.all(requests)
-      const allDocs = perDay.flat()
-
-      type Row = { name: string; regNo: string; present: number; absent: number; late: number }
-      const byStudent = new Map<string, Row>()
-
-      for (const doc of allDocs) {
-        for (const s of doc.presentStudents || []) {
-          const key = (s as any)._id
-          const row = byStudent.get(key) || { name: (s as any).name || "—", regNo: (s as any).regNo || "—", present: 0, absent: 0, late: 0 }
-          row.present += 1; byStudent.set(key, row)
-        }
-        for (const s of doc.absentStudents || []) {
-          const key = (s as any)._id
-          const row = byStudent.get(key) || { name: (s as any).name || "—", regNo: (s as any).regNo || "—", present: 0, absent: 0, late: 0 }
-          row.absent += 1; byStudent.set(key, row)
-        }
-        for (const s of doc.lateStudents || []) {
-          const key = (s as any)._id
-          const row = byStudent.get(key) || { name: (s as any).name || "—", regNo: (s as any).regNo || "—", present: 0, absent: 0, late: 0 }
-          row.late += 1; byStudent.set(key, row)
-        }
+      // If attendance already exists (409 conflict), try to update it with PUT
+      if (res.status === 409) {
+        console.log("Attendance exists (409), attempting to update with PUT...");
+        
+        res = await fetch(`${API_BASE}/api/attendance`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        
+        json = await res.json();
+        console.log("PUT response:", json);
       }
 
-      const rows = Array.from(byStudent.entries()).map(([studentId, r]) => {
-        const totalMarks = r.present + r.absent + r.late
-        const percentage = totalMarks > 0 ? Math.round((r.present / totalMarks) * 100) : 0
-        return { studentId, student: r.name, regNo: r.regNo, present: r.present, absent: r.absent, late: r.late, percentage }
-      })
-      rows.sort((a, b) => a.student.localeCompare(b.student))
-      setMonthlyAgg(rows)
-    } catch (e: any) {
-      setMonthlyError(e?.message || "Failed to fetch monthly report")
-      setMonthlyAgg([])
+      if (!res.ok || json?.success === false) {
+        throw new Error(json?.message || "Failed to save attendance");
+      }
+
+      toast({ 
+        title: "Attendance Saved", 
+        description: `Successfully recorded attendance for ${students.length} students.` 
+      });
+      
+      // Don't clear attendance state - keep it visible
+      // setAttendance({});
+    } catch (error: any) {
+      console.error("Save error:", error);
+      toast({ 
+        title: "Error", 
+        description: error.message || "Failed to save attendance", 
+        variant: "destructive" 
+      });
     } finally {
-      setMonthlyLoading(false)
+      setIsSaving(false);
     }
-  }
-  useEffect(() => { fetchMonthly() /* eslint-disable-next-line */ }, [selectedMonth, classId, timeslotId])
+  };
 
-  const todayLabel = useMemo(() => selectedDate.toISOString().slice(0, 10), [selectedDate])
-  const monthLabel = useMemo(() => {
-    const y = selectedMonth.getUTCFullYear()
-    const m = selectedMonth.toLocaleString("en-US", { month: "long", timeZone: "UTC" })
-    return `${m} ${y}`
-  }, [selectedMonth])
+  const handleExport = async () => {
+    if (!selectedClass) {
+      return toast({ title: "Error", description: "Select class first", variant: "destructive" });
+    }
 
-  function setMark(studentId: string, mark: Mark) {
-    setMarks((prev) => ({ ...prev, [studentId]: mark }))
-  }
+    setIsExporting(true);
+    try {
+      const dateStr = selectedDate.toISOString().split("T")[0];
+      const res = await fetch(`${API_BASE}/api/attendance/export?classId=${selectedClass}&date=${dateStr}`);
+      
+      if (!res.ok) throw new Error("Failed to fetch report");
 
-  const totals = useMemo(() => {
-    let present = 0, absent = 0, late = 0, unmarked = 0
-    students.forEach(s => {
-      const m = marks[s._id] || "unmarked"
-      if (m === "present") present++
-      else if (m === "absent") absent++
-      else if (m === "late") late++
-      else unmarked++
-    })
-    return { present, absent, late, unmarked, total: students.length }
-  }, [students, marks])
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `attendance-${dateStr}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      
+      toast({ title: "Export Successful", description: "Report downloaded." });
+    } catch (err) {
+      console.error("Export error:", err);
+      toast({ 
+        title: "Error", 
+        description: (err instanceof Error ? err.message : "Export failed"), 
+        variant: "destructive" 
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const statusCounts = useMemo(() => {
+    const counts = { present: 0, absent: 0, late: 0, total: students.length };
+    
+    students.forEach((student) => {
+      const record = attendance[student._id];
+      const status = record?.status || "present";
+      counts[status]++;
+    });
+    
+    return counts;
+  }, [attendance, students]);
 
   return (
     <AdminLayout>
-      <div className="flex items-center gap-3">
-        <h1 className="text-lg font-semibold md:text-2xl">Attendance Management</h1>
-      </div>
+      <div className="space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Mark Attendance</CardTitle>
+            <CardDescription>Record daily attendance for students</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Date</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button 
+                      variant="outline" 
+                      className={cn(
+                        "w-full justify-start text-left font-normal",
+                        !selectedDate && "text-muted-foreground"
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {selectedDate ? format(selectedDate, "PPP") : "Pick a date"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={selectedDate}
+                      onSelect={(date) => date && setSelectedDate(date)}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
 
-      <Tabs defaultValue="marking" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="marking">Daily Marking</TabsTrigger>
-          <TabsTrigger value="reports">Reports &amp; Analytics</TabsTrigger>
-        </TabsList>
-
-        {/* ======================== MARKING TAB ======================== */}
-        <TabsContent value="marking" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Select Filters</CardTitle>
-              <CardDescription>Choose Class, Timeslot and Date to mark attendance</CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-3 md:grid-cols-4">
-              {/* CLASS DROPDOWN */}
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Class</label>
-                <Select
-                  value={classId}
-                  onValueChange={(v) => setClassId(v)}
-                  disabled={classesLoading}
-                >
+              <div className="space-y-2">
+                <Label>Class</Label>
+                <Select value={selectedClass} onValueChange={setSelectedClass}>
                   <SelectTrigger>
-                    <SelectValue placeholder={classesLoading ? "Loading classes..." : "Select class"} />
+                    <SelectValue placeholder="Select class" />
                   </SelectTrigger>
                   <SelectContent>
-                    {classesError && <div className="px-3 py-2 text-sm text-destructive">{classesError}</div>}
                     {classes.map((c) => (
                       <SelectItem key={c._id} value={c._id}>
-                        {c.name || c._id}
+                        {c.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+          </CardContent>
+        </Card>
 
-              {/* TIMESLOT DROPDOWN */}
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Timeslot</label>
-                <Select
-                  value={timeslotId}
-                  onValueChange={(v) => setTimeslotId(v)}
-                  disabled={!classId || slotsLoading || slots.length === 0}
-                >
-                  <SelectTrigger>
-                    <SelectValue
-                      placeholder={
-                        !classId
-                          ? "Select class first"
-                          : slotsLoading
-                            ? "Loading timeslots..."
-                            : (slots.length ? "Select timeslot" : "No timeslots")
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {slotsError && <div className="px-3 py-2 text-sm text-destructive">{slotsError}</div>}
-                    {slots.map((t) => (
-                      <SelectItem key={t._id} value={t._id}>
-                        {slotText(t)} • {subjectText(t)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* DATE */}
-              <div className="space-y-1">
-                <label className="text-sm font-medium">Date (UTC)</label>
-                <Input
-                  type="date"
-                  value={toYMD(selectedDate)}
-                  onChange={(e) => {
-                    const [y, m, d] = e.target.value.split("-").map(Number)
-                    if (!y || !m || !d) return
-                    setSelectedDate(new Date(Date.UTC(y, m - 1, d)))
-                  }}
-                />
-              </div>
-
-              {/* NOTES */}
-              <div className="space-y-1 md:col-span-1">
-                <label className="text-sm font-medium">Notes (optional)</label>
-                <Textarea placeholder="Any notes for this attendance record" value={notes} onChange={(e) => setNotes(e.target.value)} />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Mark Attendance</CardTitle>
-                  <CardDescription>
-                    {studentsLoading ? "Loading students..." : `Total students: ${students.length}`}
-                    {studentsError ? <span className="text-destructive"> • {studentsError}</span> : null}
-                  </CardDescription>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="text-sm">
-                    <Badge className="mr-1">Present: {totals.present}</Badge>
-                    <Badge variant="destructive" className="mr-1">Absent: {totals.absent}</Badge>
-                    <Badge variant="secondary" className="mr-1">Late: {totals.late}</Badge>
-                    <Badge variant="outline">Unmarked: {totals.unmarked}</Badge>
+        <div className="grid gap-6 lg:grid-cols-4">
+          <div className="lg:col-span-3">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle>Student Attendance</CardTitle>
+                  <div className="flex items-center gap-2">
+                    <Users className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">
+                      {students.length} students
+                    </span>
                   </div>
-                  <Button onClick={saveAttendance} disabled={!classId || !timeslotId || studentsLoading} className="gap-2">
-                    <Save className="h-4 w-4" /> Save Attendance
-                  </Button>
                 </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead style={{ width: 240 }}>Student</TableHead>
-                      <TableHead>Reg No</TableHead>
-                      <TableHead className="text-center">Present</TableHead>
-                      <TableHead className="text-center">Absent</TableHead>
-                      <TableHead className="text-center">Late</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {studentsLoading ? (
-                      <TableRow>
-                        <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
-                          Loading students by class…
-                        </TableCell>
-                      </TableRow>
-                    ) : students.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
-                          {classId ? "No students found for this class." : "Select a Class to load students."}
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      students.map((s) => {
-                        const value = marks[s._id] || "unmarked"
-                        return (
-                          <TableRow key={s._id}>
-                            <TableCell className="font-medium">{s.name || "—"}</TableCell>
-                            <TableCell>{s.regNo || "—"}</TableCell>
-                            <TableCell className="text-center">
-                              <input
-                                type="radio"
-                                name={`mark-${s._id}`}
-                                checked={value === "present"}
-                                onChange={() => setMark(s._id, value === "present" ? "unmarked" : "present")}
-                                aria-label="Present"
-                              />
-                            </TableCell>
-                            <TableCell className="text-center">
-                              <input
-                                type="radio"
-                                name={`mark-${s._id}`}
-                                checked={value === "absent"}
-                                onChange={() => setMark(s._id, value === "absent" ? "unmarked" : "absent")}
-                                aria-label="Absent"
-                              />
-                            </TableCell>
-                            <TableCell className="text-center">
-                              <input
-                                type="radio"
-                                name={`mark-${s._id}`}
-                                checked={value === "late"}
-                                onChange={() => setMark(s._id, value === "late" ? "unmarked" : "late")}
-                                aria-label="Late"
-                              />
-                            </TableCell>
-                          </TableRow>
-                        )
-                      })
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* ======================== REPORTS TAB ======================== */}
-        <TabsContent value="reports" className="space-y-6">
-          {/* Daily Summary */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Daily Summary</CardTitle>
-                  <CardDescription>
-                    Attendance for <span className="font-medium">{todayLabel}</span>
-                    {classId ? <> • Class: <span className="font-medium">{classId}</span></> : null}
-                    {timeslotId ? <> • Slot: <span className="font-medium">{timeslotId}</span></> : null}
-                  </CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {dailyError && (
-                <div className="mb-3 rounded-md bg-destructive/15 p-3 text-sm text-destructive">
-                  <strong>Error:</strong> {dailyError}
-                </div>
-              )}
-              <div className="rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Slot</TableHead>
-                      <TableHead>Subject</TableHead>
-                      <TableHead>Class</TableHead>
-                      <TableHead>Present</TableHead>
-                      <TableHead>Absent</TableHead>
-                      <TableHead>Late</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {dailyLoading ? (
-                      <TableRow>
-                        <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                          Loading daily summary…
-                        </TableCell>
-                      </TableRow>
-                    ) : dailyRows.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                          No attendance records for this date.
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      dailyRows.map((doc) => (
-                        <TableRow key={doc._id}>
-                          <TableCell className="font-medium">{slotText(doc.timeslot)}</TableCell>
-                          <TableCell>{subjectText(doc.timeslot)}</TableCell>
-                          <TableCell>{classText(doc.class)}</TableCell>
-                          <TableCell><Badge variant="default">{doc.presentStudents?.length ?? 0}</Badge></TableCell>
-                          <TableCell><Badge variant="destructive">{doc.absentStudents?.length ?? 0}</Badge></TableCell>
-                          <TableCell><Badge variant="secondary">{doc.lateStudents?.length ?? 0}</Badge></TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Quick Stats */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Quick Stats</CardTitle>
-              <CardDescription>Overall attendance statistics (today)</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {dailyRows.length === 0 ? (
-                <div className="text-sm text-muted-foreground">No data to summarize.</div>
-              ) : (
-                <div className="space-y-4">
-                  {(() => {
-                    const present = dailyRows.reduce((acc, d) => acc + (d.presentStudents?.length || 0), 0)
-                    const absent  = dailyRows.reduce((acc, d) => acc + (d.absentStudents?.length || 0), 0)
-                    const late    = dailyRows.reduce((acc, d) => acc + (d.lateStudents?.length || 0), 0)
-                    const totalMarks = present + absent + late
-                    const avg = totalMarks ? Math.round((present / totalMarks) * 100) : 0
-                    return (
-                      <div className="space-y-4">
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="text-center">
-                            <div className="text-2xl font-bold text-green-600">{avg}%</div>
-                            <div className="text-xs text-muted-foreground">Average Attendance</div>
-                          </div>
-                          <div className="text-center">
-                            <div className="text-2xl font-bold text-blue-600">
-                              {dailyRows.reduce((acc, d) => Math.max(acc, d.totalStudents || 0), 0)}
+              </CardHeader>
+              <CardContent>
+                {students.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    {selectedClass 
+                      ? "No students found in this class" 
+                      : "Please select a class to view students"}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {students.map((student) => {
+                      const record = attendance[student._id];
+                      return (
+                        <div key={student._id} className="rounded-lg border p-4">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1">
+                              <div className="font-medium">{student.name}</div>
+                              <div className="text-sm text-muted-foreground">{student.regNo}</div>
                             </div>
-                            <div className="text-xs text-muted-foreground">Max Class Size</div>
+
+                            <div className="flex gap-2">
+                              <Button
+                                size="sm"
+                                variant={record?.status === "present" ? "default" : "outline"}
+                                onClick={() => handleStatusChange(student._id, "present")}
+                              >
+                                Present
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant={record?.status === "absent" ? "destructive" : "outline"}
+                                onClick={() => handleStatusChange(student._id, "absent")}
+                              >
+                                Absent
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant={record?.status === "late" ? "secondary" : "outline"}
+                                onClick={() => handleStatusChange(student._id, "late")}
+                              >
+                                Late
+                              </Button>
+                            </div>
                           </div>
+
+                          {record && (
+                            <div className="mt-3">
+                              <Textarea
+                                placeholder="Add notes (optional)..."
+                                value={record.notes}
+                                onChange={(e) => handleNotesChange(student._id, e.target.value)}
+                                rows={2}
+                                className="text-sm"
+                              />
+                            </div>
+                          )}
                         </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
 
-                        <div className="space-y-2">
-                          <div className="flex justify-between text-sm">
-                            <span>Present Today:</span>
-                            <span className="font-medium text-green-600">{present}</span>
-                          </div>
-                          <div className="flex justify-between text-sm">
-                            <span>Absent Today:</span>
-                            <span className="font-medium text-red-600">{absent}</span>
-                          </div>
-                          <div className="flex justify-between text-sm">
-                            <span>Late Today:</span>
-                            <span className="font-medium text-orange-600">{late}</span>
-                          </div>
-                        </div>
-
-                        <Button className="w-full gap-2">
-                          <BarChart3 className="h-4 w-4" />
-                          View Detailed Analytics
-                        </Button>
-                      </div>
-                    )
-                  })()}
+          <div className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Attendance Summary</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-sm">Present:</span>
+                    <Badge variant="default">{statusCounts.present}</Badge>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm">Absent:</span>
+                    <Badge variant="destructive">{statusCounts.absent}</Badge>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm">Late:</span>
+                    <Badge variant="secondary">{statusCounts.late}</Badge>
+                  </div>
+                  <div className="flex justify-between border-t pt-2">
+                    <span className="text-sm font-medium">Total:</span>
+                    <Badge variant="outline">{statusCounts.total}</Badge>
+                  </div>
                 </div>
-              )}
-            </CardContent>
-          </Card>
 
-          {/* Monthly Student Report */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Monthly Student Report</CardTitle>
-                  <CardDescription>
-                    Individual attendance for <span className="font-medium">{monthLabel}</span>
-                    {classId ? <> • Class: <span className="font-medium">{classId}</span></> : null}
-                    {timeslotId ? <> • Slot: <span className="font-medium">{timeslotId}</span></> : null}
-                  </CardDescription>
-                </div>
-                {/* Export PDF button (restored) */}
-                <div className="flex gap-2">
+                <div className="space-y-2">
+                  <Button 
+                    onClick={handleSave} 
+                    disabled={isSaving || students.length === 0} 
+                    className="w-full gap-2"
+                  >
+                    <Save className="h-4 w-4" />
+                    {isSaving ? "Saving..." : "Save Attendance"}
+                  </Button>
                   <Button
+                    onClick={handleExport}
+                    disabled={isExporting || students.length === 0}
                     variant="outline"
-                    size="sm"
-                    className="gap-2 bg-transparent"
-                    onClick={fetchMonthly}
-                    disabled={monthlyLoading}
+                    className="w-full gap-2 bg-transparent"
                   >
                     <Download className="h-4 w-4" />
-                    Export PDF
+                    {isExporting ? "Exporting..." : "Export Daily Report"}
                   </Button>
                 </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {monthlyError && (
-                <div className="mb-3 rounded-md bg-destructive/15 p-3 text-sm text-destructive">
-                  <strong>Error:</strong> {monthlyError}
-                </div>
-              )}
-              <div className="rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Student</TableHead>
-                      <TableHead>Reg No</TableHead>
-                      <TableHead>Present</TableHead>
-                      <TableHead>Absent</TableHead>
-                      <TableHead>Late</TableHead>
-                      <TableHead>Percentage</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {monthlyLoading ? (
-                      <TableRow>
-                        <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                          Building monthly report…
-                        </TableCell>
-                      </TableRow>
-                    ) : monthlyAgg.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                          No data for this month.
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      monthlyAgg.map((s) => (
-                        <TableRow key={s.studentId}>
-                          <TableCell className="font-medium">{s.student}</TableCell>
-                          <TableCell>{s.regNo}</TableCell>
-                          <TableCell><Badge variant="default">{s.present}</Badge></TableCell>
-                          <TableCell><Badge variant="destructive">{s.absent}</Badge></TableCell>
-                          <TableCell><Badge variant="secondary">{s.late}</Badge></TableCell>
-                          <TableCell>
-                            <Badge variant={s.percentage >= 90 ? "default" : s.percentage >= 75 ? "secondary" : "destructive"}>
-                              {s.percentage}%
-                            </Badge>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </div>
     </AdminLayout>
-  )
+  );
 }
