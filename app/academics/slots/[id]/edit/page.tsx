@@ -55,17 +55,27 @@ export default function EditSlotPage() {
     (async () => {
       try {
         setLoading(true);
+        setErrMsg(null);
         const res = await fetch(`${API_BASE}/api/timetable-slots/${id}`, {
           headers: { "Content-Type": "application/json" },
           cache: "no-store",
         });
+        
+        if (!res.ok) {
+          throw new Error(`HTTP error! status: ${res.status}`);
+        }
+        
         const json = await res.json();
         if (!alive) return;
-        if (!res.ok || !json?.success || !json?.data) {
+        
+        if (!json?.success || !json?.data) {
           throw new Error(json?.message || `Failed to fetch slot ${id}`);
         }
+        
+        console.log("Loaded slot data:", json.data);
         setSlot(json.data as ApiSlot);
       } catch (err: any) {
+        console.error("Error loading slot:", err);
         if (alive) setErrMsg(err?.message || "Failed to load slot");
       } finally {
         if (alive) setLoading(false);
@@ -98,21 +108,58 @@ export default function EditSlotPage() {
     };
   }, [slot]);
 
-  const handleSubmit = async (payload: any) => {
+  const handleSubmit = async (formData: any) => {
     if (!id) return;
+    
     try {
       setSaving(true);
+      
+      // Transform the form data to match backend expectations
+      const payload: any = {
+        day: formData.day,
+        startTime: formData.startTime,
+        endTime: formData.endTime,
+        class: formData.class,
+        subject: formData.subject,
+        instructorName: formData.instructorName || "",
+      };
+
+      // Handle location based on delivery type
+      if (formData.delivery === "online") {
+        payload.location = {
+          link: formData.location?.link || formData.locationLink || ""
+        };
+      } else {
+        payload.location = {
+          room: formData.location?.room || formData.locationRoom || ""
+        };
+      }
+
+      console.log("Sending update payload:", payload);
+
       const res = await fetch(`${API_BASE}/api/timetable-slots/${id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify(payload),
       });
+
       const json = await res.json();
-      if (!res.ok || !json?.success) {
+      console.log("Update response:", json);
+
+      if (!res.ok) {
+        throw new Error(json?.message || `HTTP error! status: ${res.status}`);
+      }
+
+      if (!json?.success) {
         throw new Error(json?.message || "Failed to update slot");
       }
+
+      // Success - redirect
       router.push("/academics/slots");
     } catch (err: any) {
+      console.error("Error updating slot:", err);
       alert(err?.message || "Error updating slot");
     } finally {
       setSaving(false);
@@ -122,17 +169,29 @@ export default function EditSlotPage() {
   const handleDelete = async () => {
     if (!id) return;
     if (!confirm("Are you sure you want to delete this slot?")) return;
+    
     try {
       setDeleting(true);
       const res = await fetch(`${API_BASE}/api/timetable-slots/${id}`, {
         method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
       });
+
+      if (!res.ok) {
+        throw new Error(`HTTP error! status: ${res.status}`);
+      }
+
       const json = await res.json();
-      if (!res.ok || !json?.success) {
+      
+      if (!json?.success) {
         throw new Error(json?.message || "Failed to delete slot");
       }
+      
       router.push("/academics/slots");
     } catch (err: any) {
+      console.error("Error deleting slot:", err);
       alert(err?.message || "Error deleting slot");
     } finally {
       setDeleting(false);
@@ -169,6 +228,9 @@ export default function EditSlotPage() {
           </CardHeader>
           <CardContent>
             <div className="text-sm text-red-600">{errMsg}</div>
+            <Button className="mt-4" onClick={() => router.back()}>
+              Go Back
+            </Button>
           </CardContent>
         </Card>
       )}
